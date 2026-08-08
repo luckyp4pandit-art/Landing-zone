@@ -5,6 +5,7 @@ on:
 
 jobs:
   terraform:
+    name: Terraform Plan
     runs-on: self-hosted
 
     defaults:
@@ -27,5 +28,3 @@ jobs:
 
       - name: Terraform Plan
         run: terraform plan
-
-    
