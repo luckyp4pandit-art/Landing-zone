@@ -1,11 +1,10 @@
-
 trigger:
   branches:
     include:
       - main
       - feature/*
-      
-pr: none
+
+      pr: none
 
 pool:
   name: default
