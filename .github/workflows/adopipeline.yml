@@ -1,0 +1,132 @@
+
+trigger:
+  branches:
+    include:
+      - main
+      - feature/*
+      
+pr: none
+
+pool:
+  name: default
+
+stages:
+
+# ==========================================
+# STAGE 1: TFLINT SCAN
+# ==========================================
+
+- stage: tflint_scan
+  displayName: TFLint Security and Quality Scan
+
+  jobs:
+  - job: tflint_s
+    displayName: Run TFLint
+
+    steps:
+
+    # GitHub repository checkout
+    - checkout: self
+      clean: true
+
+    # Terraform Version
+    - task: PowerShell@2
+      displayName: Terraform Version
+      inputs:
+        targetType: inline
+        script: |
+          terraform version
+          tflint --version
+
+    # TFLint Scan
+    - task: PowerShell@2
+      displayName: TFLint Init and Scan
+      inputs:
+        targetType: inline
+        workingDirectory: '$(Build.SourcesDirectory)/Environment/dev'
+        script: |
+          tflint --init
+          tflint
+
+    # Azure Blob Permission Test
+    - task: AzureCLI@2
+      displayName: Test Azure Blob Permission
+      inputs:
+        azureSubscription: 'ashipipeline'
+        scriptType: ps
+        scriptLocation: inlineScript
+        inlineScript: |
+          Write-Host "Testing Azure Blob permission..."
+
+          az storage blob list `
+            --account-name vmo2store `
+            --container-name vmcontainer `
+            --auth-mode login `
+            --output table
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Blob listing permission failed"
+          }
+
+          Write-Host "Blob listing successful"
+
+
+# ==========================================
+# STAGE 2: TERRAFORM INIT
+# VALIDATE AND PLAN
+# ==========================================
+
+- stage: terraform_plan
+  displayName: Terraform Init Validate Plan
+
+  dependsOn: tflint_scan
+  condition: succeeded()
+
+  jobs:
+  - job: terraform
+    displayName: Terraform Execution
+
+    steps:
+
+    # GitHub repository checkout
+    - checkout: self
+      clean: true
+
+    # Terraform Init with Azure Remote Backend
+    - task: TerraformTask@5
+      displayName: Terraform Init
+      inputs:
+        provider: azurerm
+        command: init
+        backendServiceArm: 'ashipipeline'
+        backendAzureRmResourceGroupName: 'ashrgdonotdelete'
+        backendAzureRmStorageAccountName: 'vmo2store'
+        backendAzureRmContainerName: 'vmcontainer'
+        backendAzureRmKey: 'sapna.tfstate'
+        workingDirectory: '$(Build.SourcesDirectory)/Environment/dev'
+
+    # Terraform Validate
+    - task: PowerShell@2
+      displayName: Terraform Validate
+      inputs:
+        targetType: inline
+        workingDirectory: '$(Build.SourcesDirectory)/Environment/dev'
+        script: |
+          terraform validate
+
+    # Terraform Plan
+    - task: AzureCLI@2
+      displayName: Terraform Plan
+      inputs:
+        azureSubscription: 'ashipipeline'
+        scriptType: ps
+        scriptLocation: inlineScript
+        workingDirectory: '$(Build.SourcesDirectory)/Environment/dev'
+        inlineScript: |
+          terraform plan -out=tfplan
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Terraform Plan failed"
+          }
+
+          Write-Host "Terraform Plan completed successfully"
